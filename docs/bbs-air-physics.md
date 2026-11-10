@@ -170,3 +170,19 @@ in `arc\pc\p01base.arc`): 100.0001. So **1 BBS unit = 100 KH units** (Aqua 1.107
   move. BBS's gravity modifiers (script coefficient, status `0x1B1`) scale the game's gravity.
 - **Assumption:** at a ceiling the rise ends in a fall from rest (neither game's ceiling rule was
   read).
+
+## 6. Combo Master for everyone (t4)
+
+- **Checked (decomp).** BBS's combo-continue check `0x14021C140`, for an attack (`+0x5E0` 1),
+  goes on only when the deck's queued flag (`+0x390` → `+0x60` bit `0x1000`) is set or the last
+  swing hit (player `+0x320` bit `0x20`, set by the hit handler `0x140293D40`); else the combo
+  ends (`test r10b, 20h` at `0x14021C376`, `je` `74 33` at `0x14021C37A`, Checked (exe)).
+- The ini's `combo_master = on` (default, the owner: "give everyone combo master for right now")
+  makes that `je` two NOPs: every combo goes on after a miss, Combo Master's effect. `off` puts
+  the bytes back. Live.
+- **Checked (decomp).** Abilities: support abilities `0x1C4..0x1E1` count per player at
+  `+0x4A3 + slot` (`0x140221900`; slot = command table `0x140814900 + id × 0x18`, byte 7).
+  `0x1D3` Combo Plus and `0x1D4` Air Combo Plus (the combo counter `0x1402239B0` adds them to the
+  combo's length, ground / air); `0x1D1` Finish Boost (the damage step `0x1402211B0`).
+- **Not found:** Combo Master's own id and check (Assumption: next to the combo counter, perhaps
+  `0x1D5`, or in `0x14021E490`, which Ghidra couldn't decompile).

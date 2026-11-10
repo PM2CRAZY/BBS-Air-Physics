@@ -5,6 +5,7 @@
 //! `DllMain`, and only in BBS's exe (the folder is shared with KH1, KH2 and Re:CoM).
 
 mod air;
+mod combo;
 mod hook;
 mod sys;
 
@@ -83,6 +84,7 @@ fn load_settings(first: bool) {
     let s = settings::parse(&text);
     let was = rule();
     set_rule(s.rule);
+    unsafe { combo::apply(s.combo_master) };
     if first {
         log(&format!("air physics: {}", s.rule.name()));
     } else if was != s.rule {
@@ -134,8 +136,9 @@ pub unsafe extern "system" fn DllMain(_inst: *mut c_void, reason: u32, _reserved
     }
     log(&format!("BBS Air Physics {} loaded in {exe}", crate::VERSION));
     std::panic::set_hook(Box::new(|info| log(&format!("PANIC: {info}"))));
-    load_settings(true);
     let base = GetModuleHandleA(std::ptr::null()) as usize;
+    combo::install(base);
+    load_settings(true);
     if air::install(base) {
         CreateThread(std::ptr::null_mut(), 0, watch, std::ptr::null_mut(), 0, std::ptr::null_mut());
     } else {

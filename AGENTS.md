@@ -8,6 +8,13 @@ and gives the addresses, the change, and Checked / Assumption tags.
 Read first, every session: `docs/design-philosophy-instructions.md`, `docs/engineering-rules.md`,
 `docs/tester-requests.md`, then the top entries below.
 
+### 2026-11-09: Stage 4 (testing branch: Combo Master's effect for everyone)
+The owner: "give everyone combo master for right now".
+
+- **Found:** BBS's combo-continue check `0x14021C140` (Checked (decomp)) ends an attack combo when the last swing didn't hit (`+0x320` bit `0x20`) and no deck command is queued: `je` `74 33` at `0x14021C37A` (Checked (exe)).
+- **Change:** ini `combo_master = on | off` (on when missing). On: that `je` is two NOPs, so every character's combo goes on after a miss (Combo Master's effect); off: BBS's bytes back. Switched live with the ini.
+- **Assumption:** Combo Master's own ability id and check weren't found; the ability menu doesn't show it.
+
 ### 2026-11-09: Stage 3 (testing branch: The game's gravity during air attacks)
 The owner, testing t1: "ventus doesn't fall in the middle of his attack swings in air".
 

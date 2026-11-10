@@ -74,3 +74,19 @@ pub unsafe fn install(target: usize, expect: &[u8], ours: usize, original: &Atom
     super::log(&format!("hooked {what} at {target:#x}"));
     true
 }
+
+/// Writes `new` over `at` (code or data) if the bytes there are `expect`.
+pub unsafe fn patch(at: usize, expect: &[u8], new: &[u8]) -> bool {
+    if !bytes_are(at, expect) || expect.len() != new.len() {
+        return false;
+    }
+    let mut old = 0u32;
+    if VirtualProtect(at as *mut c_void, new.len(), 0x40, &mut old) == 0 {
+        return false;
+    }
+    std::ptr::copy_nonoverlapping(new.as_ptr(), at as *mut u8, new.len());
+    let mut tmp = 0u32;
+    VirtualProtect(at as *mut c_void, new.len(), old, &mut tmp);
+    FlushInstructionCache(GetCurrentProcess(), at as *const c_void, new.len());
+    true
+}

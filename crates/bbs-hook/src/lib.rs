@@ -12,7 +12,7 @@ pub mod settings;
 
 /// The mod's version (the log, the Config menu): `t` + the stage of the latest `AGENTS.md`
 /// entry, bumped with every change to the source.
-pub const VERSION: &str = "t3";
+pub const VERSION: &str = "t4";
 
 #[cfg(all(windows, target_arch = "x86_64"))]
 mod win;
