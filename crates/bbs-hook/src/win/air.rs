@@ -13,6 +13,13 @@
 //! Jump and High Jump (the ground jumps) are the game's own; BBS's other air moves (Doubleflight,
 //! air commands) rise as BBS's and fall as the game's (the owner: question 2 (b)). The take-off
 //! wait is BBS's (its jump motion). Steering stays BBS's.
+//!
+//! Air attacks (t3): BBS steps their vertical speed in its shared step `0x14021CB00`, which with
+//! the air-attack flag (`+0x318` bit `0x800000`) cuts gravity to ×0.16 and holds the speed at 0
+//! for the swing's window (a hover). With the rule at KH1 or KH2 that step gives the same arc
+//! instead: the jump's arc goes on through the swings, each launch BBS gives (a swing's hop)
+//! rising as high on the game's curve, and the game's gravity in between (the owner: "ventus
+//! doesn't fall in the middle of his attack swings in air").
 
 use super::hook;
 use crate::arc::{Arc, Params, Rule};
@@ -38,8 +45,16 @@ const CMD_HIGH_JUMP: u16 = 0xFA;
 const MOTION: usize = 0x422;
 const LEVEL: usize = 0x34E;
 const FLAGS: usize = 0x318;
+/// Player flag: an air attack (`0x14021CB00` cuts gravity and holds the fall in its window).
+const AIR_ATTACK: u32 = 0x80_0000;
 /// Player flag set by `0x1402645F0`'s special jump (`0x14025DBD0` = 4): BBS's own.
 const SPECIAL_JUMP: u32 = 0x1000;
+/// BBS's shared vertical step (`0x14021CB00 (player, frame, window end, flags)`).
+const VERTICAL_STEP: usize = 0x21CB00;
+/// `sub rsp, 18h; mov rdx, [rcx+80h]`.
+const VERTICAL_STEP_START: [u8; 11] = [0x48, 0x83, 0xEC, 0x18, 0x48, 0x8B, 0x91, 0x80, 0x00, 0x00, 0x00];
+/// Movement flags `0x2010000`: on the ground (`0x140264A10`). Checked (decomp).
+const MV_GROUNDED: u32 = 0x201_0000;
 
 // Player fields (Checked (decomp)).
 const STATE: usize = 0x304;
@@ -59,6 +74,7 @@ const MV_VY: usize = 0xB4;
 const BBS_G_PER_PPM: f32 = 0.008_166_667;
 
 static ORIGINAL: AtomicUsize = AtomicUsize::new(0);
+static ORIGINAL_STEP: AtomicUsize = AtomicUsize::new(0);
 static BASE: AtomicUsize = AtomicUsize::new(0);
 
 #[derive(Clone, Copy, Debug)]
@@ -75,7 +91,6 @@ struct Track {
     rule: Rule,
     mode: Mode,
     /// The vertical speed we last handed BBS (a different one is BBS's own launch).
-    #[allow(dead_code)]
     handed: f32,
 }
 
@@ -95,6 +110,7 @@ pub unsafe fn install(base: usize) -> bool {
         return false;
     }
     hook::install(base + AIR_UPDATE, &AIR_UPDATE_START, air_update as *const () as usize, &ORIGINAL, "BBS's player air update")
+        && hook::install(base + VERTICAL_STEP, &VERTICAL_STEP_START, vertical_step as *const () as usize, &ORIGINAL_STEP, "BBS's shared vertical step")
 }
 
 unsafe fn original(p: usize) {
@@ -260,3 +276,47 @@ unsafe fn after_arc(p: usize, g: &mut Option<Track>) {
     }
 }
 
+/// BBS's shared vertical step (`0x14021CB00`): with the rule at KH1 or KH2, an air attack's
+/// vertical speed is the game's arc (the one he jumped or fell on, going on); a launch BBS gives
+/// (a speed it wrote since our last) rises as high on the game's curve. On the ground, outside
+/// air attacks, or at BBS: BBS's own step.
+///
+/// Assumption: neither game's own per-swing hop is used yet (BBS's hops keep their height).
+unsafe extern "C" fn vertical_step(p: usize, frame: f32, window: f32, flags: u32) {
+    let rule = super::rule();
+    let orig: unsafe extern "C" fn(usize, f32, f32, u32) = std::mem::transmute(ORIGINAL_STEP.load(Ordering::Acquire));
+    let mv: usize = rd(p + MOVEMENT);
+    let mut g = TRACK.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(par) = params(p, rule) else {
+        drop(g);
+        return orig(p, frame, window, flags);
+    };
+    if mv == 0 || rd::<u32>(mv + MV_FLAGS) & MV_GROUNDED != 0 {
+        // On the ground: any arc is over.
+        if g.is_some_and(|t| t.player == p) {
+            *g = None;
+        }
+        drop(g);
+        return orig(p, frame, window, flags);
+    }
+    if rd::<u32>(p + FLAGS) & AIR_ATTACK == 0 {
+        drop(g);
+        return orig(p, frame, window, flags);
+    }
+    let now: f32 = rd(p + VY);
+    let bbs_g = -rd::<f32>(p + GRAVITY);
+    let mut arc = match *g {
+        // Going on, unless BBS launched him (a speed up that isn't ours: a swing's hop). A swing
+        // zeroing the speed (its hover) doesn't stop the arc.
+        Some(Track { player, rule: r, mode: Mode::Arc(a), handed }) if player == p && r == rule && !(now > 0.0 && (now - handed).abs() > 1e-6) => a,
+        // BBS launched him, or we're new to this air: from his speed now.
+        _ => Arc::launch(now, bbs_g, &par),
+    };
+    let vy = step(p, &mut arc, &par);
+    wr(p + VY, vy);
+    wr(p + VY_OUT, vy);
+    // (BBS's own gravity for whatever reads it next; not the air attack's ×0.16.)
+    wr(p + 0x508, -bbs_g);
+    wr(mv + MV_VY, vy);
+    *g = Some(Track { player: p, rule, mode: Mode::Arc(arc), handed: vy });
+}

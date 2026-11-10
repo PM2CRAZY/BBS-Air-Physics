@@ -8,6 +8,13 @@ and gives the addresses, the change, and Checked / Assumption tags.
 Read first, every session: `docs/design-philosophy-instructions.md`, `docs/engineering-rules.md`,
 `docs/tester-requests.md`, then the top entries below.
 
+### 2026-11-09: Stage 3 (testing branch: The game's gravity during air attacks)
+The owner, testing t1: "ventus doesn't fall in the middle of his attack swings in air".
+
+- **Found:** BBS steps nearly every action's vertical speed through `0x14021CB00` (Checked (decomp)); with the air-attack flag (player `+0x318` bit `0x800000`) it cuts gravity to ×0.16 and holds the speed at 0 for the swing's window: the hover.
+- **Change:** that step is wrapped (first bytes `48 83 EC 18 48 8B 91 80 00 00 00`, Checked (exe)). With KH1 / KH2, airborne in an air attack, it gives the game's arc: the jump's or fall's arc goes on through the swings at the game's gravity and fall cap; BBS's own launch (a positive speed it wrote) rises as high on the game's curve. On the ground, outside air attacks and at BBS: BBS's own step.
+- **Assumption:** KH1's / KH2's own per-swing hops (KH2's combo rows' jump, KH1's air-attack hop) aren't used yet; BBS's hops keep their height.
+
 ### 2026-11-09: Stage 2 (testing branch: High Jump is the chosen game's High Jump)
 The owner, testing t1: "I feel like nothing much has changed". Their log: every jump was command `0xFA` (BBS's rise, then KH2's fall).
 

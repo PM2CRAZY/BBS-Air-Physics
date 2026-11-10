@@ -157,6 +157,15 @@ in `arc\pc\p01base.arc`): 100.0001. So **1 BBS unit = 100 KH units** (Aqua 1.107
 - **Other jumps** (Doubleflight, air jumps): BBS's rise, the game's fall from its apex (the
   owner: 2 (b)). BBS's apex hang ends there.
 - A fall that follows an air attack goes on from the arc he had (t2).
+- **Air attacks** (t3): BBS's shared vertical step `0x14021CB00 (player, frame, window end,
+  flags)` (Checked (decomp); first bytes `48 83 EC 18 48 8B 91 80 00 00 00`) adds gravity × step
+  to `+0x50C`, writes it to the movement, and with the air-attack flag (`+0x318` bit `0x800000`)
+  uses gravity × 0.16 and holds the speed at 0 while the swing's frame is before its window end:
+  BBS's hover. With KH1 / KH2, while airborne (movement flags `0x2010000` clear) with that flag,
+  the step gives the game's arc instead: the arc he jumped or fell on goes on through the swings;
+  a positive speed BBS wrote that isn't ours (a swing's hop) starts a rise as high as BBS's would
+  go (`v² / 2g` at BBS's gravity) on the game's curve. Assumption: KH1's and KH2's own per-swing
+  hops aren't used yet.
 - **Kept BBS's:** the take-off wait (BBS's jump motion), steering, landing, ledges, every air
   move. BBS's gravity modifiers (script coefficient, status `0x1B1`) scale the game's gravity.
 - **Assumption:** at a ceiling the rise ends in a fall from rest (neither game's ceiling rule was
