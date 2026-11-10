@@ -1,0 +1,11 @@
+[package]
+name = "bbs-hook"
+description = "BBS Air Physics: switches the player's air physics in Kingdom Hearts Birth by Sleep Final Mix (PC, Steam) between BBS, KH1 and KH2. Loaded by OpenKH's Panacea from the mod's bbs\\dll folder."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "MIT OR Apache-2.0"
+
+[lib]
+name = "bbs_air_physics"
+crate-type = ["cdylib", "rlib"]

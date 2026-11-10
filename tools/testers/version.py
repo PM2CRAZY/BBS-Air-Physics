@@ -10,7 +10,10 @@ if patch:
     r = subprocess.run(['git', 'apply', '--3way', patch], capture_output=True, text=True)
     if r.returncode: print(r.stderr); sys.exit(1)
 p = 'AGENTS.md'; s = open(p, encoding='utf-8').read()
-s = f'### {datetime.date.today()}: Stage {ver} (testing branch: {title})\n' + body.rstrip() + '\n\n' + s
+entry = f'### {datetime.date.today()}: Stage {ver} (testing branch: {title})\n' + body.rstrip() + '\n\n'
+s = s.replace('No versions yet.\n', '')
+i = s.find('\n### ')
+s = s[:i + 1] + entry + s[i + 1:] if i >= 0 else s.rstrip('\n') + '\n\n' + entry
 open(p, 'w', encoding='utf-8').write(s)
 p = 'crates/bbs-hook/src/lib.rs'; s = open(p, encoding='utf-8').read()
 s, n = re.subn(r'pub const VERSION: &str = "t\d+";', f'pub const VERSION: &str = "t{ver}";', s)

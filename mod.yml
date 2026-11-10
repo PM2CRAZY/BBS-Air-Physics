@@ -1,0 +1,12 @@
+title: BBS Air Physics (TEST BRANCH)
+originalAuthor: PM
+description: >-
+  Switches the player's air physics in Kingdom Hearts Birth by Sleep Final Mix between BBS's own,
+  KH1's and KH2's: their jump arcs, gravity, fall speed and early-release hop, in BBS's own air
+  state, for Terra, Ventus and Aqua. Steam release of KH 1.5+2.5. The setting is air_physics in
+  bbs-air-physics.ini in the game folder (made on first launch; saved changes apply at once).
+assets:
+- name: dll/bbs-air-physics.dll
+  method: copy
+  source:
+  - name: bbs-air-physics.dll

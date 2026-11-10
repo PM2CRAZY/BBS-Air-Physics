@@ -23,6 +23,8 @@
 !/LICENSE-APACHE
 # The built mod DLL (committed by the testing build) and its GitHub workflow.
 !/bbs-air-physics.dll
+# The OpenKH mod manifest.
+!/mod.yml
 !/.github/workflows/*.yml
 
 # 4. Documentation (notes only: no dumps, no decompiled code, no tables copied from the game).

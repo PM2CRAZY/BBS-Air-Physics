@@ -79,51 +79,79 @@ scripts use these: whatever we change must keep them working.
 ## 3. BBS's player jump
 
 - **Checked (decomp).** The player classes are `PL::CPlayer` (vtable `0x140646D48`) and
-  `PL::CPlayerVentus` / `CPlayerAqua` / `CPlayerTerra`. Their per-character movement numbers
-  are a game file, **`PPM_VENT`, `PPM_AQUA`, `PPM_TERR`** (names at `0x140819670`), loaded by
-  `0x14021A7F0` into player `+0x370` (the pointer `PPM` below).
-  `PAT_*` files load next to them.
-- **Checked (decomp).** A jump sets the take-off y speed (player `+0x504`, written into the
-  movement's y velocity) from **`PPM +0xC`**, times modifiers: player `+0x330` (a multiplier),
-  and per move a factor (×1.65 for one action, ×2 for another, `(level × 0.25 + 0.75)` for one
-  with levels; `0x140224310`, `0x1402552D0`, `0x14025E8F0`). Which action is the plain jump, and which are
-  High Jump / Doubleflight / air moves, is **not read yet**.
-- Other `PPM` fields read by the player code: `+0x10`, `+0x14`, `+0x1C`, `+0x20`, `+0x24`,
-  `+0x28`, `+0x2C` (meaning not read yet; likely walk / run / air speeds, **Assumption**).
-- The values in `PPM_*` come from the game's data, not the exe. **Not read yet:** they need
-  the player's files or a log of them at runtime.
+  `PL::CPlayerVentus` / `CPlayerAqua` / `CPlayerTerra`. The player update `0x140220550` runs
+  one function per state (player `+0x304`, set by `0x14021FF60`): 4 jump and 5 fall (with 10,
+  11) are `0x140263030`, the air update.
+- **Checked (decomp), (files).** Per-character numbers come from `PPM_VENT` / `PPM_AQUA` /
+  `PPM_TERR` (64 bytes each, in `arc\pc\p01init.arc` / `p02init.arc` / `p03init.arc`), loaded by
+  `0x14021A7F0` into player `+0x370`. All three have `+8` 0.6 (gravity factor), `+0xC` 27.6
+  (jump speed), `+0x10` 1.75 (max rise). `+0` / `+4` differ (Ventus 1.3 / 6.2, Aqua 1.3 / 6.2,
+  Terra 1.5 / 6.5), and `+0x1C..+0x28` (Ventus 0.2, 0.7, 1.0, −1.5; Aqua 0.3, 0.75, 1.05, −1.6;
+  Terra 0.4, 0.8, 1.1, −1.7); `+0x20` / `+0x24` / `+0x28` are the ledge grab's reach.
+- **Checked (decomp).** Each frame `0x140220550` sets the player's step `+0x328` (entity
+  `+0x20`), jump multiplier `+0x330 = PPM[8] × 0.008166667` and gravity `+0x32C = −PPM[8] ×
+  0.008166667 × the global coefficient`, halved while status `0x1B1` is on.
+- **Checked (decomp).** The jump starts in `0x1402645F0 (player, kind)`: kind 0 a jump (state 4;
+  speed `+0x504 = PPM[0xC]` for the plain Jump command `0xF9` in `+0x34C`, else the command
+  row's level value × `PPM[0xC]` / 100; max rise `+0x524`), 2 / 3 an air jump (state 4), others
+  a fall (state 5, speed 0). Phase `+0x4E8` = 1.
+- **Checked (decomp).** The air update's phases: 1 waits one frame on the ground, then
+  `+0x50C = +0x504 × +0x330` and phase 2. Phase 2 rises: past the max rise or at a ceiling
+  (movement flags `0x8040000`) the speed halves; speed `+= gravity × step`; with jump let go
+  after 6 frames it halves and goes to 3; held, it hangs at speed 0 until 13 / 18 frames
+  (motions 9 / 0xC). Phases 3 / 6 fall. 4 / 5 leave the speed alone (the classifier
+  `0x140263DB0`: 5 rising, 4 falling; BBS's own phase 4 is a glide-type move from
+  `0x140264200`). Then (all but 1 and 7): air actions `0x1402176B0`, y velocity = `+0x510`,
+  steering (`+0x51C` eases to the run speed × 0.8 / 60 at 0.05 a step), and in 3 / 4 / 6 / 8 the
+  landing (`0x140264A10`) and the ledge grab. The jump button is `0x140272670 (pad + 0x58)`,
+  pad at `+0x360`.
+- **Checked (decomp).** The movement step adds the movement's own gravity only with its flag
+  `0x100`; the player's air update sets the y velocity itself each frame.
+- So BBS's plain jump: 27.6 × 0.0049 = 0.135 a frame up, gravity 0.0049, about 1.8 high (cut
+  at 1.75), apex near frame 28.
 
-## 4. KH1's and KH2's air physics (from the KH2-Combat-in-KH1 notes)
+## 4. KH1's and KH2's air physics
 
-Both are per 60 Hz frame. Their distance unit is the same family (KH2 Sora's hips 88.5, KH1
-Sora's 78.9 units high).
+Both are per 60 Hz frame, in centimetres. **Checked (files):** KH2 Sora's root bone stands
+102.623 high in his rest pose (`obj\P_EX100.mdlx`), Ventus's `center` joint 1.026229 (`p01ex00.pmo`
+in `arc\pc\p01base.arc`): 100.0001. So **1 BBS unit = 100 KH units** (Aqua 1.107, Terra 1.154).
 
 **KH2** (`movement-model.md`, Checked (exe)):
 - Rise: `y = h · sin(π/2 · sin(π/2 · t / T))`, `T = √(2h / g)`, `g = 20/49` per frame².
 - Fall: a parabola at `g` from the apex, each tick's drop capped at 16 a frame.
-- Held jump: released after 6+ frames of rise and 5+ frames before the apex cuts the rise to a
-  small hop. Sora: about 115 tapped, 185 held.
-- Air steering on the 30 Hz tick: with the stick `v = 0.9 v + 0.1 target`, without `v = 0.95 v`.
+- Speeds recomputed on the 30 Hz tick (every second frame) and held between.
+- Early release: on a tick more than 6 frames into the rise and more than 5 before the apex,
+  the rest of the rise becomes a hop `g × 0.5 × 5 × 5` high. The first such tick is frame 8:
+  85.9 + 5.1, the "about 115 tapped". Held: 185.
+- The take-off is the jump motion's "Jump" event (frame 4 for Sora): part of KH2's animation.
 
-**KH1** (`kh1-physics.md`, Checked (decomp), Steam addresses there):
-- Same rise curve as KH2. Fall at `g = 0.48469388` per frame², capped at 20 a frame.
-- Jump height from Sora's stats (High Jump raises the stat).
-- Air steering: without the stick, velocity × drag (per 30 Hz frame); with the stick, adds
-  `direction × air acceleration × tilt`, its length kept to the larger of its old length and the
-  run speed. Walk-off momentum capped at 8. Takeoff waits 4 frames.
-- KH1's air acceleration and drag values and Sora's base jump height are runtime stats, not read
-  yet.
+**KH1** (Steam KH1 FM decomp, Checked (decomp)):
+- The same rise curve; `g = 0.48469388` (`0x1402AF960`); a frame's drop capped at 20
+  (`0x1402AF6A0`); stepped every frame (times the frame scale).
+- Jump height: the stats block's `+0x10`, default **190** (`0x1402A4730`, which also sets walk 2,
+  run 8, air acceleration 0.1, air drag 0.95). Assumption: Sora's isn't changed from the default
+  outside High Jump (KH2-Combat-in-KH1's log: 290 with High Jump).
+- Take-off: 4 frames (`0x1402AFDA0`).
+- Early release (`0x1402A7B30`): every frame with the button let go, 6 or more frames into the
+  rise and the apex more than 5 away: a launch at speed 5 (a hop `g × 12.5` high). Within 5 of the
+  apex the window shuts.
+- Air steering (`0x1402AF6A0`): stick held, `v += direction × 0.1 × move speed`, its length kept
+  to the larger of its old length and the run speed; let go, `v × 0.95` (per 30 Hz frame, its
+  square root at 60 fps).
 
-## 5. What this means for the setting (not decided; see the thread)
+## 5. The setting (t1)
 
-- **The rise is different in kind.** BBS's jump is velocity plus constant gravity. KH1's and
-  KH2's rise is a height curve against time. A native port gives BBS's movement a new step kind
-  (a "KH arc": rise on the curve, then fall with that game's gravity and cap), added to the step
-  table at `0x140817A98` (moved to make room), and picked by the player's jump when the setting
-  is KH1 or KH2. BBS's own step 0 stays as it is.
-- **The distance scale is open.** BBS's gravity (0.0082 a frame²) and fall cap (0.75 a frame) are
-  about 50 to 60 times smaller than KH1's and KH2's, so one BBS unit is roughly a metre against
-  KH's roughly a centimetre (**Assumption** until characters' heights are compared from the
-  files). How KH heights and speeds are converted is a design choice to settle with the testers.
-- **What each character keeps** (Glide, Doubleflight, air dodges, air Command Styles) is open
-  too.
+`win::air` wraps BBS's air update `0x140263030` (first bytes `48 8B C4 48 89 70 10`). With
+`air_physics` at KH1 or KH2:
+- **The plain Jump** (`0xF9`): when BBS's take-off ends, the game's arc (`arc::Arc`): its
+  height, curve, gravity, fall cap, tick and early release (the button through `0x140272670`).
+  Each frame the arc's speed goes into `+0x50C` / `+0x510` and the phase is 5 (rising) or 4
+  (falling); BBS's own update then does everything else.
+- **Falls** (walking off, after BBS's air moves, and any fall we find BBS running): the game's
+  fall, from the speed BBS had.
+- **Other jumps** (High Jump, Doubleflight, air jumps): BBS's rise, the game's fall from its
+  apex (the owner: 2 (b)). BBS's apex hang ends there.
+- **Kept BBS's:** the take-off wait (BBS's jump motion), steering, landing, ledges, every air
+  move. BBS's gravity modifiers (script coefficient, status `0x1B1`) scale the game's gravity.
+- **Assumption:** at a ceiling the rise ends in a fall from rest (neither game's ceiling rule was
+  read).
