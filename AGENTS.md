@@ -8,6 +8,13 @@ and gives the addresses, the change, and Checked / Assumption tags.
 Read first, every session: `docs/design-philosophy-instructions.md`, `docs/engineering-rules.md`,
 `docs/tester-requests.md`, then the top entries below.
 
+### 2026-11-09: Stage 2 (testing branch: High Jump is the chosen game's High Jump)
+The owner, testing t1: "I feel like nothing much has changed". Their log: every jump was command `0xFA` (BBS's rise, then KH2's fall).
+
+- **Found:** `0xFA` is High Jump (Checked (exe): its command row at `0x140811080 + 0xFA × 0x1E` gives 100 / 114 / 123 / 132 / 143 % jump speed by level and +2.25 max rise; Jump `0xF9` is 100 %). With it equipped it is the only ground jump, so t1's "other jumps rise as BBS's" took every jump.
+- **Change:** a ground jump (motion `+0x422` 9 or 0xC, Checked (decomp) `0x1402645F0`) is the game's: Jump its jump, High Jump its High Jump by BBS's level `+0x34E`: KH2 235 / 310 / 385 / 585 (Checked (files): `03system.bin` `fmab`), KH1 290 (Checked (trace): KH2-Combat-in-KH1's log). Holdable (early release) as KH2's button jumps. A fall after an air move goes on from the arc he had.
+- **Assumptions:** BBS's High Jump level 0 counts as level 1; KH1's High Jump is one level.
+
 ### 2026-11-09: Stage 1 (testing branch: KH1 / KH2 jump and fall arcs in BBS's air state)
 The owner: "I want to create a mod for Birth by Sleep that adds a setting in game to switch between the air physics of KH1, KH2, and default BBS"; units 1 (a) a fixed ratio checked by model heights; 2 (b) BBS's air moves stay BBS's, their fall is the chosen game's.
 

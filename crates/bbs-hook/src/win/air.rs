@@ -10,9 +10,9 @@
 //!
 //! With the rule at KH1 or KH2, a jump or fall is put in phase 5 (rising) or 4 (falling) and
 //! handed the speed of that game's arc each frame (`arc::Arc`): BBS's own update does the rest.
-//! BBS's other air moves (High Jump, Doubleflight, air commands) rise as BBS's; their fall,
-//! like every fall, is the chosen game's (the user: question 2 (b)). The take-off wait is BBS's
-//! (its jump motion). Steering stays BBS's in this version.
+//! Jump and High Jump (the ground jumps) are the game's own; BBS's other air moves (Doubleflight,
+//! air commands) rise as BBS's and fall as the game's (the owner: question 2 (b)). The take-off
+//! wait is BBS's (its jump motion). Steering stays BBS's.
 
 use super::hook;
 use crate::arc::{Arc, Params, Rule};
@@ -28,9 +28,18 @@ const AIR_UPDATE_START: [u8; 7] = [0x48, 0x8B, 0xC4, 0x48, 0x89, 0x70, 0x10];
 const JUMP_HELD: usize = 0x272670;
 const JUMP_HELD_START: [u8; 6] = [0x40, 0x53, 0x48, 0x83, 0xEC, 0x20];
 
-/// The plain Jump command (player `+0x34C`; `0x1402645F0` reads its speed straight from
-/// `PPM +0xC` for it). Checked (decomp).
-const CMD_JUMP: u16 = 0xF9;
+/// High Jump (player `+0x34C`, level `+0x34E`): its command row (`0x140811080 + id × 0x1E`)
+/// gives 100 / 114 / 123 / 132 / 143 % of the jump speed by level and +2.25 max rise; Jump
+/// `0xF9` is 100 %. Checked (exe) (the rows), (decomp) (`0x1402645F0`), (trace) (the owner's
+/// log: every jump was `0xFA`).
+const CMD_HIGH_JUMP: u16 = 0xFA;
+/// The jump motions `0x1402645F0` starts a ground jump with (9 Jump, 0xC the others; an air
+/// jump is 0x3E), at player `+0x422`. Checked (decomp).
+const MOTION: usize = 0x422;
+const LEVEL: usize = 0x34E;
+const FLAGS: usize = 0x318;
+/// Player flag set by `0x1402645F0`'s special jump (`0x14025DBD0` = 4): BBS's own.
+const SPECIAL_JUMP: u32 = 0x1000;
 
 // Player fields (Checked (decomp)).
 const STATE: usize = 0x304;
@@ -40,7 +49,6 @@ const COMMAND: usize = 0x34C;
 const PAD: usize = 0x360;
 const PPM: usize = 0x370;
 const PHASE: usize = 0x4E8;
-const SPEED: usize = 0x504;
 const VY: usize = 0x50C;
 const VY_OUT: usize = 0x510;
 const MOVEMENT: usize = 0x80;
@@ -66,6 +74,9 @@ struct Track {
     player: usize,
     rule: Rule,
     mode: Mode,
+    /// The vertical speed we last handed BBS (a different one is BBS's own launch).
+    #[allow(dead_code)]
+    handed: f32,
 }
 
 static TRACK: Mutex<Option<Track>> = Mutex::new(None);
@@ -142,25 +153,34 @@ unsafe fn step(p: usize, arc: &mut Arc, par: &Params) -> f32 {
     arc.step(if dt.is_finite() && dt > 0.0 { dt } else { 1.0 })
 }
 
-/// BBS's take-off just ended (phase 1 to 2): the plain jump gets the game's jump, a fall the
-/// game's fall from rest; any other jump rises as BBS's.
-unsafe fn lift_off(p: usize, rule: Rule, par: &Params) -> Track {
+/// BBS's take-off just ended (phase 1 to 2): Jump and High Jump get the game's own; a fall goes
+/// on from the arc he had (an air attack ending) or starts from rest; an air jump rises as BBS's.
+unsafe fn lift_off(p: usize, rule: Rule, par: &Params, before: Option<Track>) -> Track {
     let state: i32 = rd(p + STATE);
-    let ppm: usize = rd(p + PPM);
-    let plain = state == 4 && rd::<u16>(p + COMMAND) == CMD_JUMP && ppm != 0 && rd::<f32>(p + SPEED) == rd::<f32>(ppm + 0xC);
-    let mode = if plain || state == 5 {
-        let mut arc = if plain { Arc::jump(par) } else { Arc::falling(0.0, par) };
+    let cmd: u16 = rd(p + COMMAND);
+    let ground = state == 4 && matches!(rd::<u16>(p + MOTION), 9 | 0xC) && rd::<u32>(p + FLAGS) & SPECIAL_JUMP == 0;
+    let mode = if ground || state == 5 {
+        let mut arc = if ground && cmd == CMD_HIGH_JUMP {
+            Arc::high_jump(rd(p + LEVEL), par)
+        } else if ground {
+            Arc::jump(par)
+        } else {
+            match before.map(|t| t.mode) {
+                Some(Mode::Arc(a)) => a,
+                _ => Arc::falling(0.0, par),
+            }
+        };
         let vy = step(p, &mut arc, par);
         hand_over(p, vy, true);
-        if plain {
-            super::log(&format!("jump: {} arc, {:.0} high, apex in {:.1} frames", rule.name(), arc.height * crate::arc::KH_PER_BBS, arc.uptime));
+        if ground {
+            super::log(&format!("jump: command {cmd:#x} level {}, {} arc {:.0} high, apex in {:.1} frames", rd::<u8>(p + LEVEL), rule.name(), arc.height * crate::arc::KH_PER_BBS, arc.uptime));
         }
         Mode::Arc(arc)
     } else {
-        super::log(&format!("jump: command {:#x}, BBS's rise, then {}'s fall", rd::<u16>(p + COMMAND), rule.name()));
+        super::log(&format!("jump: command {cmd:#x} (air jump), BBS's rise, then {}'s fall", rule.name()));
         Mode::BbsRise
     };
-    Track { player: p, rule, mode }
+    Track { player: p, rule, mode, handed: rd(p + VY) }
 }
 
 unsafe extern "C" fn air_update(p: usize) {
@@ -188,19 +208,19 @@ unsafe extern "C" fn air_update(p: usize) {
     let phase: i32 = rd(p + PHASE);
     match (phase, g.map(|t| t.mode)) {
         (1, _) => {
-            *g = None;
+            let before = g.take();
             original(p);
             if matches!(rd::<i32>(p + STATE), 4 | 5) && rd::<i32>(p + PHASE) == 2 {
-                *g = Some(lift_off(p, rule, &par));
+                *g = Some(lift_off(p, rule, &par, before));
             }
         }
         (2 | 3 | 6, Some(Mode::BbsRise)) | (2, None) if rd::<f32>(p + VY) > 0.0 => {
-            *g = Some(Track { player: p, rule, mode: Mode::BbsRise });
+            *g = Some(Track { player: p, rule, mode: Mode::BbsRise, handed: 0.0 });
             original(p);
             // BBS's rise is over at its apex: the game's fall from there.
             if matches!(rd::<i32>(p + STATE), 4 | 5) && matches!(rd::<i32>(p + PHASE), 2 | 3 | 6) && rd::<f32>(p + VY) <= 0.0 {
                 let down = -rd::<f32>(p + VY);
-                *g = Some(Track { player: p, rule, mode: Mode::Arc(Arc::falling(down, &par)) });
+                *g = Some(Track { player: p, rule, mode: Mode::Arc(Arc::falling(down, &par)), handed: -down });
                 wr::<i32>(p + PHASE, 4);
             } else if !matches!(rd::<i32>(p + PHASE), 2 | 3 | 6) {
                 *g = None;
@@ -212,14 +232,14 @@ unsafe extern "C" fn air_update(p: usize) {
             let mut arc = Arc::falling(down, &par);
             let vy = step(p, &mut arc, &par);
             hand_over(p, vy, false);
-            *g = Some(Track { player: p, rule, mode: Mode::Arc(arc) });
+            *g = Some(Track { player: p, rule, mode: Mode::Arc(arc), handed: vy });
             original(p);
             after_arc(p, &mut g);
         }
         (4 | 5, Some(Mode::Arc(mut arc))) => {
             let vy = step(p, &mut arc, &par);
             hand_over(p, vy, false);
-            *g = Some(Track { player: p, rule, mode: Mode::Arc(arc) });
+            *g = Some(Track { player: p, rule, mode: Mode::Arc(arc), handed: vy });
             original(p);
             after_arc(p, &mut g);
         }
@@ -239,3 +259,4 @@ unsafe fn after_arc(p: usize, g: &mut Option<Track>) {
         *g = None;
     }
 }
+

@@ -149,8 +149,14 @@ in `arc\pc\p01base.arc`): 100.0001. So **1 BBS unit = 100 KH units** (Aqua 1.107
   (falling); BBS's own update then does everything else.
 - **Falls** (walking off, after BBS's air moves, and any fall we find BBS running): the game's
   fall, from the speed BBS had.
-- **Other jumps** (High Jump, Doubleflight, air jumps): BBS's rise, the game's fall from its
-  apex (the owner: 2 (b)). BBS's apex hang ends there.
+- **High Jump** (t2): command `0xFA` (level at player `+0x34E`): the game's High Jump, KH2's
+  LV1 235 / LV2 310 / LV3 385 / MAX 585 (`fmab`, Checked (files)) for BBS's levels 1 / 2 / 3 / 4
+  (level 0 as 1: Assumption), KH1's 290 at every level. A ground jump is told by its motion
+  (`+0x422` 9 or 0xC; an air jump is 0x3E). The owner's first log: every jump was `0xFA`
+  (Ventus with High Jump), so t1 changed only the fall.
+- **Other jumps** (Doubleflight, air jumps): BBS's rise, the game's fall from its apex (the
+  owner: 2 (b)). BBS's apex hang ends there.
+- A fall that follows an air attack goes on from the arc he had (t2).
 - **Kept BBS's:** the take-off wait (BBS's jump motion), steering, landing, ledges, every air
   move. BBS's gravity modifiers (script coefficient, status `0x1B1`) scale the game's gravity.
 - **Assumption:** at a ceiling the rise ends in a fall from rest (neither game's ceiling rule was

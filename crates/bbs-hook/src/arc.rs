@@ -67,13 +67,30 @@ pub struct Params {
     pub fall_max: f32,
     /// The plain jump's height.
     pub jump: f32,
+    /// High Jump's height by level (KH2: LV1, LV2, LV3, MAX).
+    pub high_jump: [f32; 4],
     /// Frames between recomputing the vertical speed (KH2's 30 Hz tick: 2; KH1: every frame).
     pub tick: f32,
 }
 
 impl Params {
-    pub const KH2: Params = Params { gravity: 20.0 / 49.0 / KH_PER_BBS, fall_max: 16.0 / KH_PER_BBS, jump: 185.0 / KH_PER_BBS, tick: 2.0 };
-    pub const KH1: Params = Params { gravity: 0.484_693_88 / KH_PER_BBS, fall_max: 20.0 / KH_PER_BBS, jump: 190.0 / KH_PER_BBS, tick: 1.0 };
+    /// KH2: `03system.bin` `pref` → `prty` jump 185, `fmab` High Jump 235 / 310 / 385 / 585
+    /// (Checked (files)); gravity, cap and tick Checked (exe).
+    pub const KH2: Params = Params {
+        gravity: 20.0 / 49.0 / KH_PER_BBS,
+        fall_max: 16.0 / KH_PER_BBS,
+        jump: 185.0 / KH_PER_BBS,
+        high_jump: [235.0 / KH_PER_BBS, 310.0 / KH_PER_BBS, 385.0 / KH_PER_BBS, 585.0 / KH_PER_BBS],
+        tick: 2.0,
+    };
+    /// KH1: one High Jump, raising the jump stat by 100 (290; the KH2-Combat-in-KH1 log, s261).
+    pub const KH1: Params = Params {
+        gravity: 0.484_693_88 / KH_PER_BBS,
+        fall_max: 20.0 / KH_PER_BBS,
+        jump: 190.0 / KH_PER_BBS,
+        high_jump: [290.0 / KH_PER_BBS; 4],
+        tick: 1.0,
+    };
 }
 
 /// Early release: only after this many frames of rise...
@@ -119,6 +136,22 @@ impl Arc {
     /// The plain jump (holdable).
     pub fn jump(p: &Params) -> Arc {
         Arc { holdable: true, ..Arc::rise(p.jump, p) }
+    }
+
+    /// High Jump at BBS's level `level` (its command row's level byte): 0 and 1 the first
+    /// level, 4 and above the last (holdable, as KH2's button jumps are).
+    pub fn high_jump(level: u8, p: &Params) -> Arc {
+        let i = (level.max(1) as usize - 1).min(3);
+        Arc { holdable: true, ..Arc::rise(p.high_jump[i], p) }
+    }
+
+    /// A launch BBS gave at `up` units a frame under its own gravity `bbs_gravity` (a swing's
+    /// hop): a rise as high as BBS's would go, on this game's curve.
+    pub fn launch(up: f32, bbs_gravity: f32, p: &Params) -> Arc {
+        if up <= 0.0 || bbs_gravity <= 0.0 {
+            return Arc::falling((-up).max(0.0), p);
+        }
+        Arc::rise(up * up / (2.0 * bbs_gravity), p)
     }
 
     /// Falling, already going down at `down` units a frame (0: from rest): the fall's apex is
@@ -279,6 +312,23 @@ mod tests {
         let mut a = Arc::falling(0.05, &p);
         let v = a.step(1.0);
         assert!((v + 0.05).abs() < p.gravity * 1.01, "{v}");
+    }
+
+    #[test]
+    fn kh2_high_jump_levels_reach_their_heights() {
+        let p = Params::KH2;
+        for (lvl, want) in [(1u8, 235.0), (2, 310.0), (3, 385.0), (4, 585.0), (0, 235.0), (9, 585.0)] {
+            let (apex, ..) = fly(Arc::high_jump(lvl, &p), 1e9, &p);
+            assert!((apex * KH_PER_BBS - want).abs() < 1.0, "{lvl}: {}", apex * KH_PER_BBS);
+        }
+    }
+
+    #[test]
+    fn a_bbs_launch_keeps_its_height() {
+        let p = Params::KH1;
+        let g = 0.0049;
+        let (apex, ..) = fly(Arc::launch(0.1, g, &p), 0.0, &p);
+        assert!((apex - 0.1 * 0.1 / (2.0 * g)).abs() < 0.01, "{apex}");
     }
 
     #[test]
