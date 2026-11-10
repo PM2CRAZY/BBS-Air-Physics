@@ -8,6 +8,12 @@ and gives the addresses, the change, and Checked / Assumption tags.
 Read first, every session: `docs/design-philosophy-instructions.md`, `docs/engineering-rules.md`,
 `docs/tester-requests.md`, then the top entries below.
 
+### 2026-11-09: Stage 5 (testing branch: fix: the freeze after an air attack)
+The owner, testing t4: "the game froze after attacking in the air". Their log: two KH2 High Jumps (level 4, 585), then nothing.
+
+- **Cause:** t3's air-update wrapper held its lock on the shared arc while BBS's own air update ran; that update can start an air attack (its air actions `0x1402176B0`), whose start steps the vertical speed through `0x14021CB00` on the same thread, where `vertical_step` waited for the same lock: a deadlock. Checked (decomp): `0x1402176B0` → the attack starts (`0x140229E80` etc.) → `0x14021CB00`.
+- **Fix:** the arc is copied out and stored back with the lock held only for the copy; no BBS code runs under it (`air::load` / `air::store`). An air attack started inside the air update keeps the arc its step stored.
+
 ### 2026-11-09: Stage 4 (testing branch: Combo Master's effect for everyone)
 The owner: "give everyone combo master for right now".
 

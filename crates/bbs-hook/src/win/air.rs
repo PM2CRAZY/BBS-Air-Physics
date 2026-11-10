@@ -199,47 +199,57 @@ unsafe fn lift_off(p: usize, rule: Rule, par: &Params, before: Option<Track>) ->
     Track { player: p, rule, mode, handed: rd(p + VY) }
 }
 
+/// The track now (the lock is held only to copy it: never while BBS's code runs, which can
+/// reach `vertical_step` on this thread: t4 froze when an air attack started from the air
+/// update while it held the lock).
+fn load() -> Option<Track> {
+    *TRACK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+fn store(t: Option<Track>) {
+    *TRACK.lock().unwrap_or_else(|e| e.into_inner()) = t;
+}
+
 unsafe extern "C" fn air_update(p: usize) {
     let rule = super::rule();
-    let mut g = TRACK.lock().unwrap_or_else(|e| e.into_inner());
-    if g.is_some_and(|t| t.player != p || t.rule != rule) {
+    let mut track = load();
+    if track.is_some_and(|t| t.player != p || t.rule != rule) {
         // Another player, or the ini changed mid-air: BBS's own phase back if it was ours.
-        if let Some(t) = g.take() {
+        if let Some(t) = track.take() {
             if t.player == p && matches!(t.mode, Mode::Arc(_)) && matches!(rd::<i32>(p + PHASE), 4 | 5) {
                 wr::<i32>(p + PHASE, if rd::<f32>(p + VY) > 0.0 { 2 } else { 3 });
             }
         }
+        store(None);
     }
     let state: i32 = rd(p + STATE);
     let Some(par) = params(p, rule) else {
-        *g = None;
-        drop(g);
+        store(None);
         return original(p);
     };
     if state != 4 && state != 5 {
-        *g = None;
-        drop(g);
+        store(None);
         return original(p);
     }
     let phase: i32 = rd(p + PHASE);
-    match (phase, g.map(|t| t.mode)) {
+    match (phase, track.map(|t| t.mode)) {
         (1, _) => {
-            let before = g.take();
+            store(None);
             original(p);
             if matches!(rd::<i32>(p + STATE), 4 | 5) && rd::<i32>(p + PHASE) == 2 {
-                *g = Some(lift_off(p, rule, &par, before));
+                store(Some(lift_off(p, rule, &par, track)));
             }
         }
         (2 | 3 | 6, Some(Mode::BbsRise)) | (2, None) if rd::<f32>(p + VY) > 0.0 => {
-            *g = Some(Track { player: p, rule, mode: Mode::BbsRise, handed: 0.0 });
+            store(Some(Track { player: p, rule, mode: Mode::BbsRise, handed: 0.0 }));
             original(p);
             // BBS's rise is over at its apex: the game's fall from there.
             if matches!(rd::<i32>(p + STATE), 4 | 5) && matches!(rd::<i32>(p + PHASE), 2 | 3 | 6) && rd::<f32>(p + VY) <= 0.0 {
                 let down = -rd::<f32>(p + VY);
-                *g = Some(Track { player: p, rule, mode: Mode::Arc(Arc::falling(down, &par)), handed: -down });
+                store(Some(Track { player: p, rule, mode: Mode::Arc(Arc::falling(down, &par)), handed: -down }));
                 wr::<i32>(p + PHASE, 4);
             } else if !matches!(rd::<i32>(p + PHASE), 2 | 3 | 6) {
-                *g = None;
+                after_arc(p);
             }
         }
         (2 | 3 | 6, _) => {
@@ -248,21 +258,20 @@ unsafe extern "C" fn air_update(p: usize) {
             let mut arc = Arc::falling(down, &par);
             let vy = step(p, &mut arc, &par);
             hand_over(p, vy, false);
-            *g = Some(Track { player: p, rule, mode: Mode::Arc(arc), handed: vy });
+            store(Some(Track { player: p, rule, mode: Mode::Arc(arc), handed: vy }));
             original(p);
-            after_arc(p, &mut g);
+            after_arc(p);
         }
         (4 | 5, Some(Mode::Arc(mut arc))) => {
             let vy = step(p, &mut arc, &par);
             hand_over(p, vy, false);
-            *g = Some(Track { player: p, rule, mode: Mode::Arc(arc), handed: vy });
+            store(Some(Track { player: p, rule, mode: Mode::Arc(arc), handed: vy }));
             original(p);
-            after_arc(p, &mut g);
+            after_arc(p);
         }
         _ => {
             // BBS's own phases (the landing 7, its glide-like 4 out of `0x140264200`, ...).
-            *g = None;
-            drop(g);
+            store(None);
             original(p);
         }
     }
@@ -270,9 +279,12 @@ unsafe extern "C" fn air_update(p: usize) {
 
 /// After BBS's update ran on our phase: anything that moved him on (a landing, a ledge, an air
 /// move, a new jump) ends our arc.
-unsafe fn after_arc(p: usize, g: &mut Option<Track>) {
-    if !matches!(rd::<i32>(p + STATE), 4 | 5) || !matches!(rd::<i32>(p + PHASE), 4 | 5) {
-        *g = None;
+/// (An air attack started inside it keeps the track `vertical_step` stored: only a landing or
+/// a new phase of BBS's own in states 4 / 5 ends it here.)
+unsafe fn after_arc(p: usize) {
+    let state: i32 = rd(p + STATE);
+    if matches!(state, 4 | 5) && !matches!(rd::<i32>(p + PHASE), 4 | 5) {
+        store(None);
     }
 }
 
@@ -286,26 +298,23 @@ unsafe extern "C" fn vertical_step(p: usize, frame: f32, window: f32, flags: u32
     let rule = super::rule();
     let orig: unsafe extern "C" fn(usize, f32, f32, u32) = std::mem::transmute(ORIGINAL_STEP.load(Ordering::Acquire));
     let mv: usize = rd(p + MOVEMENT);
-    let mut g = TRACK.lock().unwrap_or_else(|e| e.into_inner());
     let Some(par) = params(p, rule) else {
-        drop(g);
         return orig(p, frame, window, flags);
     };
+    let track = load();
     if mv == 0 || rd::<u32>(mv + MV_FLAGS) & MV_GROUNDED != 0 {
         // On the ground: any arc is over.
-        if g.is_some_and(|t| t.player == p) {
-            *g = None;
+        if track.is_some_and(|t| t.player == p) {
+            store(None);
         }
-        drop(g);
         return orig(p, frame, window, flags);
     }
     if rd::<u32>(p + FLAGS) & AIR_ATTACK == 0 {
-        drop(g);
         return orig(p, frame, window, flags);
     }
     let now: f32 = rd(p + VY);
     let bbs_g = -rd::<f32>(p + GRAVITY);
-    let mut arc = match *g {
+    let mut arc = match track {
         // Going on, unless BBS launched him (a speed up that isn't ours: a swing's hop). A swing
         // zeroing the speed (its hover) doesn't stop the arc.
         Some(Track { player, rule: r, mode: Mode::Arc(a), handed }) if player == p && r == rule && !(now > 0.0 && (now - handed).abs() > 1e-6) => a,
@@ -318,5 +327,5 @@ unsafe extern "C" fn vertical_step(p: usize, frame: f32, window: f32, flags: u32
     // (BBS's own gravity for whatever reads it next; not the air attack's ×0.16.)
     wr(p + 0x508, -bbs_g);
     wr(mv + MV_VY, vy);
-    *g = Some(Track { player: p, rule, mode: Mode::Arc(arc), handed: vy });
+    store(Some(Track { player: p, rule, mode: Mode::Arc(arc), handed: vy }));
 }
